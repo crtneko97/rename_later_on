@@ -1,0 +1,35 @@
+
+# Byte-compiled / optimized Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# dotenv environment variables
+.env
+
+# IDE / editor folders
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# macOS / Windows files
+.DS_Store
+Thumbs.db
+
+# Selenium/WebDriver Manager cache
+.wdm/
+
+# Output files
+*.csv
+*.log
+
+# Miscellaneous
+pip-log.txt
+pip-delete-this-directory.txt

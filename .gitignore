@@ -1,4 +1,3 @@
-
 # Byte-compiled / optimized Python
 __pycache__/
 *.py[cod]
@@ -8,7 +7,6 @@ __pycache__/
 venv/
 env/
 .venv/
-.env/
 
 # dotenv environment variables
 .env
@@ -30,6 +28,10 @@ Thumbs.db
 *.csv
 *.log
 
+# Ignore dated output directories (YYYY-MM-DD/)
+????-??-??/
+
 # Miscellaneous
 pip-log.txt
 pip-delete-this-directory.txt
+

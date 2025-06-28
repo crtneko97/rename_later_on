@@ -7,24 +7,22 @@ from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.firefox import GeckoDriverManager
 
-# Configuration
+# ─── Configuration ────────────────────────────────────────────────────────────
 START_URL = (
     "https://arbetsformedlingen.se/platsbanken/annonser"
     "?p=5:DJh5_yyF_hEM;5:Fv7d_YhP_YmS&l=2:CifL_Rzy_Mku"
 )
-
-# 1) Create a folder named by today’s date (YYYY-MM-DD)
-today_str = datetime.date.today().isoformat()
+today_str  = datetime.date.today().isoformat()
 OUTPUT_DIR = today_str
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# -- Selenium setup --
+# ─── Selenium setup ───────────────────────────────────────────────────────────
 options = Options()
-options.headless = True
-options.page_load_strategy = "eager"
+options.headless            = True
+options.page_load_strategy  = "eager"
 options.add_argument("--width=1680")
 options.add_argument("--height=940")
 
@@ -32,29 +30,29 @@ service = Service(GeckoDriverManager().install())
 driver  = webdriver.Firefox(service=service, options=options)
 driver.set_page_load_timeout(60)
 
-def safe_get(driver, url, retries=1):
-    for attempt in range(retries + 1):
+def safe_get(url, retries=1):
+    for i in range(retries+1):
         try:
             driver.get(url)
             return
         except TimeoutException:
-            if attempt < retries:
-                print(f"[Retry] timeout loading {url}…")
+            if i < retries:
+                print(f"[Retry] loading {url}")
             else:
-                print(f"[Error] giving up on {url}")
+                print(f"[Error] could not load {url}")
 
 def slugify(text: str) -> str:
-    text = text.lower()
-    text = re.sub(r"[^\w\s-]", "", text)
-    text = re.sub(r"[\s_-]+", "-", text)
-    text = re.sub(r"^-+|-+$", "", text)
-    return text or "job"
+    s = text.lower()
+    s = re.sub(r"[^\w\s-]", "", s)
+    s = re.sub(r"[\s_-]+", "-", s).strip("-")
+    return s or "job"
 
+# ─── Main scraping logic ──────────────────────────────────────────────────────
 try:
-    # 2) Load listing page
-    safe_get(driver, START_URL, retries=2)
+    # 1) Load first page of listings
+    safe_get(START_URL, retries=2)
 
-    # 3) Accept cookies if needed
+    # 2) Accept cookies if prompted
     try:
         WebDriverWait(driver, 5).until(
             EC.element_to_be_clickable((By.XPATH, "//button[contains(text(),'Jag godkänner')]"))
@@ -62,94 +60,113 @@ try:
     except:
         pass
 
-    # 4) Wait for first job link
-    WebDriverWait(driver, 10).until(
-        EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '/platsbanken/annonser/')]"))
-    )
+    # 3) Prepare global counters
+    file_counter = 1
+    page_number  = 1
 
-    # 5) Load all pages via “Visa fler”
+    # 4) Paginate through all listing pages
     while True:
-        try:
-            more = driver.find_element(By.XPATH, "//button[contains(text(),'Visa fler')]")
-        except:
-            break
-        driver.execute_script("arguments[0].click()", more)
-        WebDriverWait(driver, 10).until(
-            lambda d: len(d.find_elements(By.XPATH, "//a[contains(@href, '/platsbanken/annonser/')]")) > 0
+        print(f"=== Page {page_number} ===")
+
+        # Wait for all job cards to appear
+        cards = WebDriverWait(driver, 10).until(
+            EC.presence_of_all_elements_located(
+                (By.XPATH, "//a[contains(@href,'/platsbanken/annonser/')]")
+            )
         )
 
-    # 6) Collect unique job URLs
-    seen = set()
-    job_links = []
-    for a in driver.find_elements(By.XPATH, "//a[contains(@href, '/platsbanken/annonser/')]"):
-        href = a.get_attribute("href")
-        if href and href not in seen:
-            seen.add(href)
-            job_links.append(href)
+        # 5) Loop over each card on this page
+        for card in cards:
+            link = card.get_attribute("href")
+            if not link:
+                continue
 
-    # 7) Scrape each job and write one file per listing
-    main_win = driver.current_window_handle
+            # Open detail in new tab
+            driver.execute_script("window.open(arguments[0]);", link)
+            driver.switch_to.window(driver.window_handles[-1])
 
-    for idx, link in enumerate(job_links, 1):
-        driver.execute_script("window.open(arguments[0])", link)
-        driver.switch_to.window(driver.window_handles[-1])
-
-        try:
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.TAG_NAME, "h1"))
-            )
-        except:
-            driver.close()
-            driver.switch_to.window(main_win)
-            continue
-
-        # Extract fields
-        title = driver.find_element(By.TAG_NAME, "h1").text.strip() if driver.find_elements(By.TAG_NAME, "h1") else ""
-        try:
-            company = driver.find_element(By.XPATH, "//strong[contains(@class, 'pb-company')]").text.strip()
-        except:
+            # Wait for content
             try:
-                company = driver.find_element(By.XPATH, "//h1/following-sibling::*[1]").text.strip()
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "h1"))
+                )
+            except:
+                driver.close()
+                driver.switch_to.window(driver.window_handles[0])
+                continue
+
+            # — Extract fields —
+            title = driver.find_element(By.TAG_NAME, "h1").text.strip()
+
+            try:
+                company = driver.find_element(
+                    By.XPATH, "//strong[contains(@class,'pb-company')]"
+                ).text.strip()
             except:
                 company = ""
+
+            try:
+                loc_txt = driver.find_element(
+                    By.XPATH, "//*[contains(text(),'Kommun:')]"
+                ).text
+                location = loc_txt.split("Kommun:")[-1].strip()
+            except:
+                location = ""
+
+            body = driver.find_element(By.TAG_NAME, "body").text
+            content = body.split("Kontakt", 1)[0] if "Kontakt" in body else body
+            # Start description at “Kvalifikationer” or “Om jobbet”
+            idx1, idx2 = content.find("Kvalifikationer"), content.find("Om jobbet")
+            start = 0
+            if idx1 != -1 and (idx2 == -1 or idx1 < idx2):
+                start = idx1
+            elif idx2 != -1:
+                start = idx2
+            description = content[start:].strip()
+
+            try:
+                mailto = driver.find_element(
+                    By.XPATH, "//a[starts-with(@href,'mailto:')]"
+                ).get_attribute("href")
+                contact_email = mailto.split("mailto:")[-1].strip()
+            except:
+                contact_email = ""
+
+            # — Save to its own file —
+            slug  = slugify(title)
+            fname = f"{file_counter:03d}-{slug}.txt"
+            path  = os.path.join(OUTPUT_DIR, fname)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(f"Title: {title}\n")
+                f.write(f"Company: {company}\n")
+                f.write(f"Location: {location}\n\n")
+                f.write("Description:\n")
+                f.write(description + "\n\n")
+                f.write(f"Contact Email: {contact_email}\n")
+                f.write(f"URL: {link}\n")
+
+            print(f"[Saved] {path}")
+            file_counter += 1
+
+            # Close tab and switch back
+            driver.close()
+            driver.switch_to.window(driver.window_handles[0])
+
+        # 6) Try to click the “Nästa” button
         try:
-            loc_txt = driver.find_element(By.XPATH, "//*[contains(text(), 'Kommun:')]").text
-            location = loc_txt.split("Kommun:")[-1].strip()
-        except:
-            location = ""
-        body_text = driver.find_element(By.TAG_NAME, "body").text
-        content = body_text.split("Kontakt", 1)[0] if "Kontakt" in body_text else body_text
-        desc_idx = 0
-        i1, i2 = content.find("Kvalifikationer"), content.find("Om jobbet")
-        if i1 != -1 and (i2 == -1 or i1 < i2):
-            desc_idx = i1
-        elif i2 != -1:
-            desc_idx = i2
-        description = content[desc_idx:].strip()
-        try:
-            mailto = driver.find_element(By.XPATH, "//a[starts-with(@href,'mailto:')]").get_attribute("href")
-            contact_email = mailto.split("mailto:")[-1].strip()
-        except:
-            contact_email = ""
+            nxt = driver.find_element(
+                By.XPATH,
+                "//button[.//span[contains(text(),'Nästa')]]"
+            )
+            driver.execute_script("arguments[0].click()", nxt)
+            page_number += 1
+            # Wait for the previous first card to become stale
+            WebDriverWait(driver, 10).until(EC.staleness_of(cards[0]))
+        except NoSuchElementException:
+            # No more pages left
+            break
 
-        # Build per-job filename and save
-        slug = slugify(title)
-        fname = f"{idx:03d}-{slug}.txt"
-        path  = os.path.join(OUTPUT_DIR, fname)
-        with open(path, "w", encoding="utf-8") as out:
-            out.write(f"Title: {title}\n")
-            out.write(f"Company: {company}\n")
-            out.write(f"Location: {location}\n\n")
-            out.write("Description:\n")
-            out.write(description + "\n\n")
-            out.write(f"Contact Email: {contact_email}\n")
-            out.write(f"URL: {link}\n")
-
-        print(f"[Saved] {path}")
-        driver.close()
-        driver.switch_to.window(main_win)
-
-    print(f"All done – {len(job_links)} files in ./{OUTPUT_DIR}/")
+    print(f"Done! Scraped {file_counter-1} jobs into ./{OUTPUT_DIR}/")
 
 finally:
     driver.quit()

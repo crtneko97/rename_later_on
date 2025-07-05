@@ -35,3 +35,11 @@ Thumbs.db
 pip-log.txt
 pip-delete-this-directory.txt
 
+
+# Data folder secrets/artifacts
+/data/persona.yaml
+/data/resume.pdf
+
+# If you accidentally created your venv at the project root,
+# ignore its config file too
+/pyvenv.cfg
